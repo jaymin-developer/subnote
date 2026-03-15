@@ -1,5 +1,6 @@
 'use client'
 
+import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useState } from 'react'
 
 import { type AnalysisResult, type SSEEvent, type SSEStepType } from '@/types'
@@ -7,6 +8,7 @@ import { type AnalysisResult, type SSEEvent, type SSEStepType } from '@/types'
 type AnalyzeStatus = 'idle' | 'analyzing' | 'complete' | 'error'
 
 export const useAnalyze = () => {
+  const queryClient = useQueryClient()
   const [status, setStatus] = useState<AnalyzeStatus>('idle')
   const [currentStep, setCurrentStep] = useState<SSEStepType | null>(null)
   const [result, setResult] = useState<AnalysisResult | null>(null)
@@ -63,6 +65,7 @@ export const useAnalyze = () => {
             if (event.step === 'complete') {
               setResult(event.data)
               setStatus('complete')
+              queryClient.setQueryData(['result', event.data.videoInfo.videoId], event.data)
             } else if (event.step === 'error') {
               setError(event.message)
               setStatus('error')
