@@ -1,21 +1,10 @@
 'use client'
 
 import { useCallback, useState } from 'react'
-import { YoutubeTranscript } from 'youtube-transcript'
 
 import { type AnalysisResult, type SSEEvent, type SSEStepType } from '@/types'
 
 type AnalyzeStatus = 'idle' | 'analyzing' | 'complete' | 'error'
-
-const extractSubtitleClientSide = async (videoId: string): Promise<string | null> => {
-  try {
-    const segments = await YoutubeTranscript.fetchTranscript(videoId)
-    if (!segments || segments.length === 0) return null
-    return segments.map((s) => s.text.trim()).filter(Boolean).join(' ').trim()
-  } catch {
-    return null
-  }
-}
 
 export const useAnalyze = () => {
   const [status, setStatus] = useState<AnalyzeStatus>('idle')
@@ -33,17 +22,12 @@ export const useAnalyze = () => {
   const analyze = useCallback(async (url: string) => {
     reset()
     setStatus('analyzing')
-    setCurrentStep('subtitle')
 
     try {
-      const videoIdMatch = url.match(/(?:v=|youtu\.be\/|shorts\/)([a-zA-Z0-9_-]{11})/)
-      const videoId = videoIdMatch?.[1] ?? ''
-      const subtitleText = videoId ? await extractSubtitleClientSide(videoId) : null
-
       const response = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url, subtitleText }),
+        body: JSON.stringify({ url }),
       })
 
       if (!response.ok || !response.body) {

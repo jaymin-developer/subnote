@@ -1,11 +1,16 @@
-import { Innertube } from 'youtubei.js'
-import { fetchTranscript, type TranscriptConfig, type TranscriptResponse } from 'youtube-transcript-plus'
-
 import { type VideoInfo } from '@/types'
 
-type TranscriptFetchOptions = Pick<TranscriptConfig, 'videoFetch' | 'transcriptFetch' | 'playerFetch' | 'userAgent'>
-
-const defaultTranscriptOptions: TranscriptFetchOptions = {}
+const INNERTUBE_API_URL = 'https://www.youtube.com/youtubei/v1/player?prettyPrint=false'
+const INNERTUBE_CONTEXT = {
+  client: {
+    clientName: 'ANDROID',
+    clientVersion: '19.29.37',
+    androidSdkVersion: 30,
+    hl: 'ko',
+    gl: 'KR',
+  },
+}
+const ANDROID_USER_AGENT = 'com.google.android.youtube/19.29.37 (Linux; U; Android 11) gzip'
 
 const oEmbedEndpoint = 'https://www.youtube.com/oembed'
 
@@ -62,21 +67,17 @@ export const fetchVideoInfo = async (videoId: string): Promise<VideoInfo> => {
   }
 }
 
-const toPlainSubtitleText = (segments: TranscriptResponse[]): string => {
-  return segments
-    .map((segment) => segment.text.trim())
-    .filter((segmentText) => segmentText.length > 0)
-    .join(' ')
-    .trim()
+interface CaptionTrack {
+  baseUrl: string
+  languageCode: string
 }
 
-const fetchSubtitleByLanguage = async (videoId: string, lang?: string): Promise<TranscriptResponse[]> => {
-  const transcriptConfig: TranscriptConfig = {
-    ...defaultTranscriptOptions,
-    ...(lang ? { lang } : {}),
+interface PlayerResponse {
+  captions?: {
+    playerCaptionsTracklistRenderer?: {
+      captionTracks?: CaptionTrack[]
+    }
   }
-
-  return fetchTranscript(videoId, transcriptConfig)
 }
 
 interface TimedTextEvent {
@@ -87,38 +88,46 @@ interface TimedTextResponse {
   events?: TimedTextEvent[]
 }
 
-const pickCaptionTrackUrl = (
-  tracks: { language_code: string; base_url: string }[],
-  lang?: string,
-): string | null => {
+const fetchCaptionTracks = async (videoId: string): Promise<CaptionTrack[]> => {
+  const response = await fetch(INNERTUBE_API_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'User-Agent': ANDROID_USER_AGENT,
+    },
+    body: JSON.stringify({
+      context: INNERTUBE_CONTEXT,
+      videoId,
+    }),
+  })
+
+  if (!response.ok) throw new Error('INNERTUBE_FETCH_FAILED')
+
+  const data = (await response.json()) as PlayerResponse
+  const tracks = data.captions?.playerCaptionsTracklistRenderer?.captionTracks
+
+  if (!tracks || tracks.length === 0) throw new Error('NO_CAPTION_TRACKS')
+
+  return tracks
+}
+
+const pickTrackUrl = (tracks: CaptionTrack[], lang?: string): string => {
   const priority = [lang, 'ko', 'en'].filter((l): l is string => Boolean(l))
 
   for (const code of priority) {
-    const match = tracks.find((t) => t.language_code === code)
-    if (match) return match.base_url
+    const match = tracks.find((t) => t.languageCode === code)
+    if (match) return match.baseUrl
   }
 
-  return tracks[0]?.base_url ?? null
+  return tracks[0].baseUrl
 }
 
-const fetchSubtitleViaInnerTube = async (videoId: string, lang?: string): Promise<string> => {
-  const innertube = await Innertube.create({ generate_session_locally: true })
-  const info = await innertube.getInfo(videoId)
-
-  const rawTracks = info.captions?.caption_tracks
-  if (!rawTracks || rawTracks.length === 0) throw new Error('NO_CAPTION_TRACKS')
-
-  const tracks = rawTracks
-    .filter((t): t is typeof t & { base_url: string } => typeof t.base_url === 'string')
-    .map((t) => ({ language_code: t.language_code, base_url: t.base_url }))
-
-  if (tracks.length === 0) throw new Error('NO_CAPTION_TRACKS')
-
-  const trackUrl = pickCaptionTrackUrl(tracks, lang)
-  if (!trackUrl) throw new Error('NO_CAPTION_TRACKS')
-
+const fetchTimedText = async (trackUrl: string): Promise<string> => {
   const url = trackUrl.includes('fmt=json3') ? trackUrl : `${trackUrl}&fmt=json3`
-  const response = await fetch(url)
+  const response = await fetch(url, {
+    headers: { 'User-Agent': ANDROID_USER_AGENT },
+  })
+
   if (!response.ok) throw new Error('TIMEDTEXT_FETCH_FAILED')
 
   const data = (await response.json()) as TimedTextResponse
@@ -133,41 +142,12 @@ const fetchSubtitleViaInnerTube = async (videoId: string, lang?: string): Promis
     .trim()
 }
 
-const fetchSubtitleViaLegacy = async (videoId: string, lang?: string): Promise<string> => {
-  const languagePriority = [lang, 'ko', 'en'].filter((item): item is string => Boolean(item))
-  const attemptedLanguages = new Set<string>()
-
-  for (const candidateLanguage of languagePriority) {
-    if (attemptedLanguages.has(candidateLanguage)) continue
-    attemptedLanguages.add(candidateLanguage)
-
-    try {
-      const segments = await fetchSubtitleByLanguage(videoId, candidateLanguage)
-      const subtitleText = toPlainSubtitleText(segments)
-      if (subtitleText.length > 0) return subtitleText
-    } catch {
-      continue
-    }
-  }
-
-  const fallbackSegments = await fetchSubtitleByLanguage(videoId)
-  const fallbackText = toPlainSubtitleText(fallbackSegments)
-  if (fallbackText.length > 0) return fallbackText
-
-  throw new Error('NO_SUBTITLE')
-}
-
 export const fetchSubtitle = async (videoId: string, lang?: string): Promise<string> => {
-  try {
-    const result = await fetchSubtitleViaInnerTube(videoId)
-    if (result.length > 0) return result
-  } catch {
-    /* fallback to legacy */
-  }
+  const tracks = await fetchCaptionTracks(videoId)
+  const trackUrl = pickTrackUrl(tracks, lang)
+  const text = await fetchTimedText(trackUrl)
 
-  try {
-    return await fetchSubtitleViaLegacy(videoId, lang)
-  } catch {
-    throw new Error('NO_SUBTITLE')
-  }
+  if (text.length === 0) throw new Error('NO_SUBTITLE')
+
+  return text
 }
