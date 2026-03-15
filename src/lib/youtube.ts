@@ -1,14 +1,6 @@
 import { type VideoInfo } from '@/types'
 
-const INNERTUBE_API_URL = 'https://www.youtube.com/youtubei/v1/player?prettyPrint=false'
-const INNERTUBE_CONTEXT = {
-  client: {
-    clientName: 'ANDROID',
-    clientVersion: '20.10.38',
-  },
-}
-const ANDROID_USER_AGENT = 'com.google.android.youtube/20.10.38 (Linux; U; Android 14)'
-
+const SUPADATA_API_URL = 'https://api.supadata.ai/v1/youtube/transcript'
 const oEmbedEndpoint = 'https://www.youtube.com/oembed'
 
 export const extractVideoId = (url: string): string | null => {
@@ -64,87 +56,32 @@ export const fetchVideoInfo = async (videoId: string): Promise<VideoInfo> => {
   }
 }
 
-interface CaptionTrack {
-  baseUrl: string
-  languageCode: string
-}
-
-interface PlayerResponse {
-  captions?: {
-    playerCaptionsTracklistRenderer?: {
-      captionTracks?: CaptionTrack[]
-    }
-  }
-}
-
-interface TimedTextEvent {
-  segs?: { utf8?: string }[]
-}
-
-interface TimedTextResponse {
-  events?: TimedTextEvent[]
-}
-
-const fetchCaptionTracks = async (videoId: string): Promise<CaptionTrack[]> => {
-  const response = await fetch(INNERTUBE_API_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'User-Agent': ANDROID_USER_AGENT,
-    },
-    body: JSON.stringify({
-      context: INNERTUBE_CONTEXT,
-      videoId,
-    }),
-  })
-
-  if (!response.ok) throw new Error('INNERTUBE_FETCH_FAILED')
-
-  const data = (await response.json()) as PlayerResponse
-  const tracks = data.captions?.playerCaptionsTracklistRenderer?.captionTracks
-
-  if (!tracks || tracks.length === 0) throw new Error('NO_CAPTION_TRACKS')
-
-  return tracks
-}
-
-const pickTrackUrl = (tracks: CaptionTrack[], lang?: string): string => {
-  const priority = [lang, 'ko', 'en'].filter((l): l is string => Boolean(l))
-
-  for (const code of priority) {
-    const match = tracks.find((t) => t.languageCode === code)
-    if (match) return match.baseUrl
-  }
-
-  return tracks[0].baseUrl
-}
-
-const fetchTimedText = async (trackUrl: string): Promise<string> => {
-  const url = trackUrl.includes('fmt=json3') ? trackUrl : `${trackUrl}&fmt=json3`
-  const response = await fetch(url, {
-    headers: { 'User-Agent': ANDROID_USER_AGENT },
-  })
-
-  if (!response.ok) throw new Error('TIMEDTEXT_FETCH_FAILED')
-
-  const data = (await response.json()) as TimedTextResponse
-  if (!data.events) throw new Error('NO_EVENTS')
-
-  return data.events
-    .flatMap((event) => event.segs ?? [])
-    .map((seg) => seg.utf8?.trim() ?? '')
-    .filter((text) => text.length > 0 && text !== '\n')
-    .join(' ')
-    .replace(/\s+/g, ' ')
-    .trim()
+interface SupadataResponse {
+  content: string
+  lang: string
 }
 
 export const fetchSubtitle = async (videoId: string, lang?: string): Promise<string> => {
-  const tracks = await fetchCaptionTracks(videoId)
-  const trackUrl = pickTrackUrl(tracks, lang)
-  const text = await fetchTimedText(trackUrl)
+  const apiKey = process.env.SUPADATA_API_KEY
+  if (!apiKey) throw new Error('SUPADATA_API_KEY_MISSING')
 
-  if (text.length === 0) throw new Error('NO_SUBTITLE')
+  const params = new URLSearchParams({
+    url: `https://www.youtube.com/watch?v=${videoId}`,
+    text: 'true',
+  })
+  if (lang) params.set('lang', lang)
 
-  return text
+  const response = await fetch(`${SUPADATA_API_URL}?${params.toString()}`, {
+    headers: { 'x-api-key': apiKey },
+  })
+
+  if (!response.ok) {
+    if (response.status === 404) throw new Error('NO_SUBTITLE')
+    throw new Error(`SUPADATA_ERROR_${response.status}`)
+  }
+
+  const data = (await response.json()) as SupadataResponse
+  if (!data.content || data.content.trim().length === 0) throw new Error('NO_SUBTITLE')
+
+  return data.content.trim()
 }
