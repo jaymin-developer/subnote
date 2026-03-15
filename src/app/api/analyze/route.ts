@@ -21,16 +21,15 @@ const createInvalidUrlResponse = () => {
   )
 }
 
-const isAnalyzeRequestBody = (value: unknown): value is { url: string } => {
-  if (typeof value !== 'object' || value === null) {
-    return false
-  }
+interface AnalyzeRequestBody {
+  url: string
+  subtitleText?: string | null
+}
 
-  if (!('url' in value)) {
-    return false
-  }
-
-  return typeof value.url === 'string'
+const isAnalyzeRequestBody = (value: unknown): value is AnalyzeRequestBody => {
+  if (typeof value !== 'object' || value === null) return false
+  if (!('url' in value)) return false
+  return typeof (value as Record<string, unknown>).url === 'string'
 }
 
 const sendEvent = (controller: ReadableStreamDefaultController, encoder: TextEncoder, event: SSEEvent): void => {
@@ -83,22 +82,25 @@ export const POST = async (request: NextRequest) => {
           message: '자막을 추출하는 중...',
         })
 
-        let subtitleRaw: string
+        let subtitleRaw: string | null = typeof body.subtitleText === 'string' && body.subtitleText.length > 0
+          ? body.subtitleText
+          : null
 
-        try {
-          subtitleRaw = await fetchSubtitle(videoId)
-        } catch (error) {
-          if (error instanceof Error && error.message === 'NO_SUBTITLE') {
-            sendEvent(controller, encoder, {
-              step: 'error',
-              message: '이 영상은 자막이 없어 처리할 수 없습니다.',
-              code: 'NO_SUBTITLE',
-            })
-            controller.close()
-            return
+        if (!subtitleRaw) {
+          try {
+            subtitleRaw = await fetchSubtitle(videoId)
+          } catch (error) {
+            if (error instanceof Error && error.message === 'NO_SUBTITLE') {
+              sendEvent(controller, encoder, {
+                step: 'error',
+                message: '이 영상은 자막이 없어 처리할 수 없습니다.',
+                code: 'NO_SUBTITLE',
+              })
+              controller.close()
+              return
+            }
+            throw error
           }
-
-          throw error
         }
 
         sendEvent(controller, encoder, {
