@@ -6,8 +6,8 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 })
 
-const MODEL = 'claude-sonnet-4-20250514'
-const RETRY_DELAYS_MS = [1000, 2000, 4000] as const
+const MODEL = 'claude-haiku-4.5-20250514'
+const RETRY_DELAYS_MS = [1000, 3000, 6000] as const
 
 const sleep = async (ms: number): Promise<void> => {
   await new Promise<void>((resolve) => {
