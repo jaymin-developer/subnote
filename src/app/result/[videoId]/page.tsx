@@ -27,6 +27,11 @@ const ResultPage = () => {
   const { data: result, isLoading, isError } = useQuery({
     queryKey: ['result', params.videoId],
     queryFn: () => fetchResult(params.videoId),
+    retry: false,
+    refetchOnWindowFocus: false,
+    refetchOnMount: false,
+    staleTime: Infinity,
+    gcTime: Infinity,
   })
 
   const handleShareLink = useCallback(async () => {
