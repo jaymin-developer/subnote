@@ -4,13 +4,10 @@ const INNERTUBE_API_URL = 'https://www.youtube.com/youtubei/v1/player?prettyPrin
 const INNERTUBE_CONTEXT = {
   client: {
     clientName: 'ANDROID',
-    clientVersion: '19.29.37',
-    androidSdkVersion: 30,
-    hl: 'ko',
-    gl: 'KR',
+    clientVersion: '20.10.38',
   },
 }
-const ANDROID_USER_AGENT = 'com.google.android.youtube/19.29.37 (Linux; U; Android 11) gzip'
+const ANDROID_USER_AGENT = 'com.google.android.youtube/20.10.38 (Linux; U; Android 14)'
 
 const oEmbedEndpoint = 'https://www.youtube.com/oembed'
 
