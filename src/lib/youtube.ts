@@ -79,24 +79,57 @@ const fetchSubtitleByLanguage = async (videoId: string, lang?: string): Promise<
   return fetchTranscript(videoId, transcriptConfig)
 }
 
-const fetchSubtitleViaInnerTube = async (videoId: string): Promise<string> => {
+interface TimedTextEvent {
+  segs?: { utf8?: string }[]
+}
+
+interface TimedTextResponse {
+  events?: TimedTextEvent[]
+}
+
+const pickCaptionTrackUrl = (
+  tracks: { language_code: string; base_url: string }[],
+  lang?: string,
+): string | null => {
+  const priority = [lang, 'ko', 'en'].filter((l): l is string => Boolean(l))
+
+  for (const code of priority) {
+    const match = tracks.find((t) => t.language_code === code)
+    if (match) return match.base_url
+  }
+
+  return tracks[0]?.base_url ?? null
+}
+
+const fetchSubtitleViaInnerTube = async (videoId: string, lang?: string): Promise<string> => {
   const innertube = await Innertube.create({ generate_session_locally: true })
   const info = await innertube.getInfo(videoId)
-  const transcriptInfo = await info.getTranscript()
 
-  const body = transcriptInfo?.transcript?.content?.body
-  if (!body) throw new Error('NO_TRANSCRIPT_BODY')
+  const rawTracks = info.captions?.caption_tracks
+  if (!rawTracks || rawTracks.length === 0) throw new Error('NO_CAPTION_TRACKS')
 
-  const segments = body.initial_segments
-  if (!segments || segments.length === 0) throw new Error('NO_SEGMENTS')
+  const tracks = rawTracks
+    .filter((t): t is typeof t & { base_url: string } => typeof t.base_url === 'string')
+    .map((t) => ({ language_code: t.language_code, base_url: t.base_url }))
 
-  return segments
-    .map((seg) => {
-      const snippet = seg.snippet as { text?: string } | undefined
-      return snippet?.text?.trim() ?? ''
-    })
-    .filter((text) => text.length > 0)
+  if (tracks.length === 0) throw new Error('NO_CAPTION_TRACKS')
+
+  const trackUrl = pickCaptionTrackUrl(tracks, lang)
+  if (!trackUrl) throw new Error('NO_CAPTION_TRACKS')
+
+  const url = trackUrl.includes('fmt=json3') ? trackUrl : `${trackUrl}&fmt=json3`
+  const response = await fetch(url)
+  if (!response.ok) throw new Error('TIMEDTEXT_FETCH_FAILED')
+
+  const data = (await response.json()) as TimedTextResponse
+  if (!data.events) throw new Error('NO_EVENTS')
+
+  return data.events
+    .flatMap((event) => event.segs ?? [])
+    .map((seg) => seg.utf8?.trim() ?? '')
+    .filter((text) => text.length > 0 && text !== '\n')
     .join(' ')
+    .replace(/\s+/g, ' ')
     .trim()
 }
 
