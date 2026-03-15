@@ -146,7 +146,7 @@ export const correctSubtitle = async (rawText: string): Promise<string> => {
   return createMessage({
     system: systemPrompt,
     user: rawText,
-    maxTokens: 6000,
+    maxTokens: 4096,
   })
 }
 
