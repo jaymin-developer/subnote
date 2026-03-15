@@ -6,8 +6,9 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 })
 
-const MODEL = 'claude-3-5-haiku-20241022'
-const RETRY_DELAYS_MS = [1000, 3000, 6000] as const
+const MODEL_FAST = 'claude-3-haiku-20240307'
+const MODEL_SMART = 'claude-sonnet-4-20250514'
+const RETRY_DELAYS_MS = [2000, 5000, 10000] as const
 
 const sleep = async (ms: number): Promise<void> => {
   await new Promise<void>((resolve) => {
@@ -117,10 +118,11 @@ const createMessage = async (params: {
   system: string
   user: string
   maxTokens: number
+  model?: string
 }): Promise<string> => {
   const response = await withRetry(() => {
     return anthropic.messages.create({
-      model: MODEL,
+      model: params.model ?? MODEL_FAST,
       max_tokens: params.maxTokens,
       system: params.system,
       messages: [{ role: 'user', content: params.user }],
@@ -183,6 +185,8 @@ export const generateSummary = async (correctedText: string, type: SummaryType):
 export const generateAllSummaries = async (
   correctedText: string,
 ): Promise<{ oneline: string; points: string[]; full: string }> => {
+  await sleep(3000)
+
   const output = await createMessage({
     system: `당신은 한국어 요약 전문가입니다.
 입력 텍스트를 바탕으로 아래 3가지 요약을 한 번에 생성하세요.
@@ -193,6 +197,7 @@ export const generateAllSummaries = async (
 스키마: {"oneline":"...","points":["..."],"full":"..."}`,
     user: correctedText,
     maxTokens: 2400,
+    model: MODEL_SMART,
   })
 
   return parseAllSummaries(output)
