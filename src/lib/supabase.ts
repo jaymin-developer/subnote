@@ -5,15 +5,18 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { type AnalysisResult, type AnalysisRow } from '@/types'
 
 let _supabase: SupabaseClient | null = null
+let _disabled = false
 
-const getSupabase = () => {
+const getSupabase = (): SupabaseClient | null => {
+  if (_disabled) return null
   if (_supabase) return _supabase
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
 
   if (!supabaseUrl || !serviceRoleKey) {
-    throw new Error('SUPABASE_ENV_MISSING')
+    _disabled = true
+    return null
   }
 
   _supabase = createClient(supabaseUrl, serviceRoleKey, {
@@ -69,7 +72,10 @@ const toAnalysisRow = (result: AnalysisResult): AnalysisRow => {
 }
 
 export const getCachedAnalysis = async (videoId: string): Promise<AnalysisResult | null> => {
-  const { data, error } = await getSupabase()
+  const client = getSupabase()
+  if (!client) return null
+
+  const { data, error } = await client
     .from('analyses')
     .select('*')
     .eq('video_id', videoId)
@@ -90,8 +96,11 @@ export const getCachedAnalysis = async (videoId: string): Promise<AnalysisResult
 }
 
 export const saveAnalysis = async (result: AnalysisResult): Promise<void> => {
+  const client = getSupabase()
+  if (!client) return
+
   const row = toAnalysisRow(result)
-  const { error } = await getSupabase()
+  const { error } = await client
     .from('analyses')
     .upsert(row, { onConflict: 'video_id' })
 
@@ -100,5 +109,4 @@ export const saveAnalysis = async (result: AnalysisResult): Promise<void> => {
   }
 
   console.error(error)
-  throw error
 }
