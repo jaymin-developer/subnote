@@ -1,3 +1,4 @@
+import { Innertube } from 'youtubei.js'
 import { fetchTranscript, type TranscriptConfig, type TranscriptResponse } from 'youtube-transcript-plus'
 
 import { type VideoInfo } from '@/types'
@@ -78,39 +79,62 @@ const fetchSubtitleByLanguage = async (videoId: string, lang?: string): Promise<
   return fetchTranscript(videoId, transcriptConfig)
 }
 
-export const fetchSubtitle = async (videoId: string, lang?: string): Promise<string> => {
+const fetchSubtitleViaInnerTube = async (videoId: string): Promise<string> => {
+  const innertube = await Innertube.create({ generate_session_locally: true })
+  const info = await innertube.getInfo(videoId)
+  const transcriptInfo = await info.getTranscript()
+
+  const body = transcriptInfo?.transcript?.content?.body
+  if (!body) throw new Error('NO_TRANSCRIPT_BODY')
+
+  const segments = body.initial_segments
+  if (!segments || segments.length === 0) throw new Error('NO_SEGMENTS')
+
+  return segments
+    .map((seg) => {
+      const snippet = seg.snippet as { text?: string } | undefined
+      return snippet?.text?.trim() ?? ''
+    })
+    .filter((text) => text.length > 0)
+    .join(' ')
+    .trim()
+}
+
+const fetchSubtitleViaLegacy = async (videoId: string, lang?: string): Promise<string> => {
   const languagePriority = [lang, 'ko', 'en'].filter((item): item is string => Boolean(item))
   const attemptedLanguages = new Set<string>()
 
   for (const candidateLanguage of languagePriority) {
-    if (attemptedLanguages.has(candidateLanguage)) {
-      continue
-    }
-
+    if (attemptedLanguages.has(candidateLanguage)) continue
     attemptedLanguages.add(candidateLanguage)
 
     try {
       const segments = await fetchSubtitleByLanguage(videoId, candidateLanguage)
       const subtitleText = toPlainSubtitleText(segments)
-
-      if (subtitleText.length > 0) {
-        return subtitleText
-      }
+      if (subtitleText.length > 0) return subtitleText
     } catch {
       continue
     }
   }
 
-  try {
-    const fallbackSegments = await fetchSubtitleByLanguage(videoId)
-    const fallbackText = toPlainSubtitleText(fallbackSegments)
+  const fallbackSegments = await fetchSubtitleByLanguage(videoId)
+  const fallbackText = toPlainSubtitleText(fallbackSegments)
+  if (fallbackText.length > 0) return fallbackText
 
-    if (fallbackText.length > 0) {
-      return fallbackText
-    }
+  throw new Error('NO_SUBTITLE')
+}
+
+export const fetchSubtitle = async (videoId: string, lang?: string): Promise<string> => {
+  try {
+    const result = await fetchSubtitleViaInnerTube(videoId)
+    if (result.length > 0) return result
+  } catch {
+    /* fallback to legacy */
+  }
+
+  try {
+    return await fetchSubtitleViaLegacy(videoId, lang)
   } catch {
     throw new Error('NO_SUBTITLE')
   }
-
-  throw new Error('NO_SUBTITLE')
 }

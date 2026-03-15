@@ -19,7 +19,8 @@
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "server-only": "^0.0.1",
-    "youtube-transcript-plus": "^1.2.0"
+    "youtube-transcript-plus": "^1.2.0",
+    "youtubei.js": "^16.0.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
